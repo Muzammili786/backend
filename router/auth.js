@@ -1,97 +1,99 @@
 const express = require('express');
 const router = express.Router();
-
+const bcrypt=require("bcryptjs")
+const nodemailer=require("nodemailer")
+const crypto=require("crypto")
+var jwt = require('jsonwebtoken');
 require('../db/conn');
 const User = require('../model/userSchema');
 
-
-router.get('/', (req, res) => {
-    res.send('hello world server router page');
-});
-
-//with promises
-
-router.post('/register', (req, res) => {
-    // data get 
-    const { name, email, password } = req.body;
-    
-    // console.log(name);
-    // console.log(email);
-    // res.send("mera register page");
-    // res.json({message: req.body});
-// check user not empty field
-    if(!name || !email || !password){
-        return res.status(422).json({error: "plz filled the field properly"});
+// email verification using nodemailer
+var transporter=nodemailer.createTransport({
+    service:"gmail",
+    auth:{
+      user:"harisharry232@gmail.com",
+      pass:"edecmeujlpalnvpq"
+    },
+    tls:{
+      rejectUnauthorized:false
     }
-//condition check email are existed or not if not make a new doc
-// user for  get user schema  
-User.findOne({email:email })
-    .then((userExist) => {
-        if(userExist){
-           return res.status(422).json({ error: "Email already Exist" }); 
-        }
-
-        const user = new User({name, email, password})
-
-    // save method returns promises
-    // 500 error for database
-        user.save().then(() => {
-            res.status(201).json({message:"user register successfuly"});
-        }).catch((err) => res.status(500).json({error:"Failed to registerd"}));
-
-    }).catch(err => { console.log(err); });
-
-});
-
-// with async
-
-
-// router.post('/register', async (req, res) => {
-   
-//     const { name, email, password } = req.body;
-
-//     if(!name || !email || !password){
-//         return res.status(422).json({error: "plz fill the field properly"});
-//     }
-
-//     try {
-
-//         const userExist = await User.findOne({email: email});
-
-//         if (userExist){
-//             return res.status(422).json({error: "Email already Exist"});
-//         }
-
-//         const user = new User({name, email, password});
-        
-//         await user.save();
-
-//         res.status(201).json({ message: "user registerd successfuly"});
-
-//     }catch (err) {
-//         console.log(err);
-//     }
-
-
-// });
-
-//login
-
-router.post('/signin', async (req, res) => {
-    try{
-        const { email, password } = req.body;
-    
-        if(!email || !password){
-            return res.status(400).json({error: "fill the data"})
-        }
-
-        const userLogin = await User.findOne({email:email});
-        console.log(userLogin);
-        res.json({message: "user signing successfully"});
-    }
-    catch (err) {
-        console.log(err);
-    }
+  })
+// create user
+router.post('/register', async(req, res,next) => {
+  const {name,email,password}=req.body  
+  if(!name || !email || !password){
+    res.json("Please add all fields")
+  } 
+const userExists=await User.findOne({email})
+if(userExists){
+    res.json("User Already Exists")
+}
+// Hash password
+const salt=await bcrypt.genSalt(10)
+const hashPassword= await bcrypt.hash(password,salt)
+const user=await User.create({
+  name,
+  email,
+  password:hashPassword,
+  emailToken:crypto.randomBytes(64).toString('hex'),
+  isVerified:false
 })
-
+// Sending EMail
+var mailOption={
+  from:'"Verify your email" <harisharry232@gmail.com>',
+  to:user.email,
+  subject:'E-HELP Verify your email',
+  html:`<h2>${user.name}! Thank you for registering on E-HELP</h2>
+  <h4>Please Verify your email to continue...</h4>
+  <a href="http://${req.headers.host}/verify-email?token=${user.emailToken}">Verify Your Email</a>`
+}
+transporter.sendMail(mailOption,function(error){
+  if(error){
+    console.log(error)
+  }
+  else{
+    console.log('A Verification Link has been sent to your Respected email');
+  }
+})
+if(user){
+  res.status(201).json({
+    _id:user.id,
+    name:user.name,
+    email:user.email,
+    token:generateToken(user._id)
+  })
+}
+else{
+  res.json("Invalid Data")
+}    
+  });
+const generateToken = (id) => {
+  return jwt.sign({id},process.env.JWT,{
+    expiresIn:'3d',
+  })
+}
+router.get("/verify-email",async(req,res,next)=>{
+    const token=req.query.token
+    const user=await User.findOne({emailToken:token})
+    if(user){
+      user.emailToken=null;
+      user.isVerified=true;
+      await user.save();
+      res.json("User is Verified")
+    }
+    else{
+      res.json("User is not Verified Please verify First")
+    } 
+  })
+// Login
+router.post("/login",async(req,res)=>{
+  const {email,password} = req.body
+  const user = await User.findOne({email})
+  if(user && (await bcrypt.compare(password, user.password)) && user.isVerified){
+    res.json("Welcome To User Profile")
+  }
+  else{
+      res.json("You are not verified")
+    }   
+})
 module.exports = router;

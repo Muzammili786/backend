@@ -2,7 +2,7 @@ const dotenv = require("dotenv").config();
 const express = require('express');
 const connectDB = require("./db/conn");
 const app = express();
-
+app.use(express.urlencoded())
 
 const User = require('./model/userSchema');
 connectDB();
